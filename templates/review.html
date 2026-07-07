@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Review · {{ target.company }}{% endblock %}
+{% block content %}
+
+<section class="review-page">
+  <div class="review-header">
+    <h1>{{ target.company }} <span class="review-role">· {{ target.role }}</span></h1>
+    <p class="target-contact">To: {{ target.contact_name or 'Unknown contact' }}{% if target.contact_title %} ({{ target.contact_title }}){% endif %} &lt;{{ target.contact_email }}&gt;</p>
+  </div>
+
+  <div class="review-grid">
+    <form method="post" class="draft-editor" id="draft-form">
+      <label>Subject
+        <input name="subject" value="{{ draft.subject }}" required>
+      </label>
+      <label>Body
+        <textarea name="body" rows="18" required>{{ draft.body }}</textarea>
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit"
+                formaction="{{ url_for('approve_and_send', target_id=target.id) }}"
+                onclick="return confirm('Send this email to {{ target.contact_email }} with your resume attached?');">
+          Approve and send
+        </button>
+        <button class="btn btn-quiet" type="submit"
+                formaction="{{ url_for('save_edits', target_id=target.id) }}">
+          Save edits
+        </button>
+      </div>
+    </form>
+
+    <aside class="claims-panel">
+      <h3>Claims check</h3>
+      <p class="claims-sub">Every statement the draft makes about you, verified against your resume.</p>
+      {% set report = draft.claims_report %}
+      {% if report and report.claims %}
+        {% if report.unsupported_count %}
+          <div class="claims-alert">{{ report.unsupported_count }} claim(s) not supported by your resume. Edit or remove them before sending.</div>
+        {% else %}
+          <div class="claims-clear">All claims supported by your resume.</div>
+        {% endif %}
+        <ul class="claims-list">
+          {% for c in report.claims %}
+          <li class="claim {{ 'claim-ok' if c.supported else 'claim-bad' }}">
+            <span class="claim-mark">{{ '✓' if c.supported else '✕' }}</span>
+            <div>
+              <p class="claim-text">{{ c.claim }}</p>
+              {% if c.evidence %}<p class="claim-evidence">{{ c.evidence }}</p>{% endif %}
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="claims-sub">No claims report available for this draft.</p>
+      {% endif %}
+    </aside>
+  </div>
+
+  <div class="review-footer">
+    <form method="post" action="{{ url_for('create_draft', target_id=target.id) }}">
+      <button class="btn btn-quiet" type="submit">Regenerate draft</button>
+    </form>
+    <form method="post" action="{{ url_for('skip', target_id=target.id) }}">
+      <button class="btn btn-ghost" type="submit">Skip this target</button>
+    </form>
+    <a class="btn btn-ghost" href="{{ url_for('index') }}">Back to pipeline</a>
+  </div>
+</section>
+
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Add target{% endblock %}
+{% block content %}
+
+<section class="form-page">
+  <h1>Add a target</h1>
+  <p class="form-hint">Paste the posting text if you have it; scraped URLs work for Greenhouse, Lever, and Ashby, but LinkedIn and Workday usually block fetches.</p>
+
+  <form method="post" class="target-form">
+    <div class="field-row">
+      <label>Company
+        <input name="company" value="{{ form.get('company', '') }}" required placeholder="Baseten">
+      </label>
+      <label>Role
+        <input name="role" value="{{ form.get('role', '') }}" required placeholder="ML Engineer, Inference">
+      </label>
+    </div>
+    <div class="field-row">
+      <label>Contact name
+        <input name="contact_name" value="{{ form.get('contact_name', '') }}" placeholder="Optional">
+      </label>
+      <label>Contact designation
+        <input name="contact_title" list="titles" value="{{ form.get('contact_title', '') }}" placeholder="e.g. Recruiter, Hiring Manager, Co-founder">
+        <datalist id="titles">
+          <option value="Recruiter">
+          <option value="HR">
+          <option value="Hiring Manager">
+          <option value="Engineering Manager">
+          <option value="Team Lead">
+          <option value="Founder">
+          <option value="Co-founder">
+          <option value="CEO">
+          <option value="CTO">
+        </datalist>
+      </label>
+      <label>Contact email
+        <input name="contact_email" type="email" value="{{ form.get('contact_email', '') }}" required placeholder="recruiting@company.com">
+      </label>
+    </div>
+    <label>Job posting URL
+      <input name="posting_url" value="{{ form.get('posting_url', '') }}" placeholder="https://jobs.company.com/...">
+    </label>
+    <label>Job posting text (overrides URL fetch)
+      <textarea name="posting_text" rows="8" placeholder="Paste the full posting here for the strongest draft">{{ form.get('posting_text', '') }}</textarea>
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Add to pipeline</button>
+      <a class="btn btn-ghost" href="{{ url_for('index') }}">Cancel</a>
+    </div>
+  </form>
+</section>
+
+{% endblock %}

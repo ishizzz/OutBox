@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Pipeline{% endblock %}
+{% block content %}
+
+<details class="import-box" {% if not targets %}open{% endif %}>
+  <summary><h3>Bulk import</h3></summary>
+  <p>CSV with columns: <code>company, role, contact_name, contact_title, contact_email, posting_url</code> (optional: <code>posting_text</code>)</p>
+  <form method="post" action="{{ url_for('import_csv') }}" enctype="multipart/form-data" class="import-form">
+    <input type="file" name="csv_file" accept=".csv" required>
+    <button class="btn btn-quiet" type="submit">Import CSV</button>
+  </form>
+</details>
+
+<section class="stats">
+  <div class="stat"><span class="stat-num">{{ counts.get('new', 0) }}</span><span class="stat-label">queued</span></div>
+  <div class="stat"><span class="stat-num">{{ counts.get('drafted', 0) }}</span><span class="stat-label">awaiting review</span></div>
+  <div class="stat"><span class="stat-num">{{ counts.get('sent', 0) }}</span><span class="stat-label">sent</span></div>
+  <div class="stat"><span class="stat-num">{{ counts.get('replied', 0) }}</span><span class="stat-label">replied</span></div>
+  {% if follow_ups %}
+  <div class="stat stat-flag"><span class="stat-num">{{ follow_ups }}</span><span class="stat-label">need follow-up</span></div>
+  {% endif %}
+</section>
+
+{% if targets %}
+<section class="toolbar">
+  <input type="search" id="target-search" class="search-input"
+         placeholder="Search by company, contact, or role..."
+         oninput="filterTargets(this.value)">
+</section>
+
+{% if counts.get('new', 0) %}
+<form method="post" action="{{ url_for('process_all') }}"
+      onsubmit="return confirm('Generate a draft for all {{ counts.get('new', 0) }} pending target(s), verify each against your resume, and immediately email any draft with no unverified claims. Anything flagged with unverified claims will be drafted but held for you to review, not sent. Continue?');">
+  <div class="bulk-bar bulk-bar-primary">
+    <div class="bulk-bar-left">
+      <strong>{{ counts.get('new', 0) }} pending target{{ 's' if counts.get('new', 0) != 1 else '' }}</strong>
+      <span class="bulk-hint">Clean drafts send automatically; flagged ones wait for review.</span>
+    </div>
+    <button class="btn btn-primary" type="submit">Generate &amp; send all pending</button>
+  </div>
+</form>
+{% endif %}
+
+<form method="post" action="{{ url_for('send_bulk') }}" id="bulk-send-form" onsubmit="return confirmBulkSend(event)">
+  {% if counts.get('drafted', 0) %}
+  <div class="bulk-bar">
+    <div class="bulk-bar-left">
+      <a href="#" onclick="toggleAll(true); return false;">Select all</a>
+      <span class="bulk-sep">·</span>
+      <a href="#" onclick="toggleAll(false); return false;">Select none</a>
+      <span class="bulk-count" id="bulk-count"></span>
+    </div>
+    <button class="btn btn-primary" type="submit">Send selected drafts</button>
+  </div>
+  {% endif %}
+
+  <section class="target-list" id="target-list">
+    {% for t in targets %}
+    <article class="target-card" id="t{{ t.id }}"
+              data-search="{{ (t.company ~ ' ' ~ t.role ~ ' ' ~ (t.contact_name or '')) | lower }}">
+      <div class="target-main">
+        <div class="target-heading">
+          {% if t.status == 'drafted' %}
+          <input type="checkbox" class="bulk-checkbox" name="target_ids" value="{{ t.id }}"
+                 data-company="{{ t.company }}"
+                 {% if not t.unsupported_count %}checked{% endif %}
+                 onchange="updateBulkCount()">
+          {% endif %}
+          <h2>{{ t.company }}</h2>
+          <span class="status status-{{ t.status }}">{{ t.status }}</span>
+          {% if t.needs_follow_up %}<span class="status status-followup">follow up</span>{% endif %}
+          {% if t.status == 'drafted' and t.unsupported_count %}
+          <span class="status status-warn">{{ t.unsupported_count }} unverified claim{{ 's' if t.unsupported_count != 1 else '' }}</span>
+          {% endif %}
+        </div>
+        <p class="target-role">{{ t.role }}</p>
+        <p class="target-contact">{{ t.contact_name or 'Unknown contact' }}{% if t.contact_title %} ({{ t.contact_title }}){% endif %} · {{ t.contact_email }}</p>
+        {% if t.status == 'drafted' and t.draft_subject %}
+        <p class="target-subject">"{{ t.draft_subject }}"</p>
+        {% endif %}
+      </div>
+      <div class="target-actions">
+        {% if t.status in ['new', 'skipped'] %}
+          <button class="btn btn-primary" type="submit" formmethod="post" formaction="{{ url_for('create_draft', target_id=t.id) }}">Generate draft</button>
+        {% elif t.status == 'drafted' %}
+          <a class="btn btn-primary" href="{{ url_for('review', target_id=t.id) }}">Review draft</a>
+          <button class="btn btn-quiet" type="submit" formmethod="post" formaction="{{ url_for('create_draft', target_id=t.id) }}">Regenerate</button>
+        {% elif t.status == 'sent' %}
+          <button class="btn btn-quiet" type="submit" formmethod="post" formaction="{{ url_for('mark_replied', target_id=t.id) }}">Mark replied</button>
+        {% endif %}
+        {% if t.status in ['new', 'drafted'] %}
+          <button class="btn btn-ghost" type="submit" formmethod="post" formaction="{{ url_for('skip', target_id=t.id) }}">Skip</button>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+</form>
+
+<p class="no-results" id="no-results" hidden>No targets match your search.</p>
+
+{% else %}
+<section class="empty">
+  <h2>No targets yet</h2>
+  <p>Add a company and role to queue your first outreach email, or import a CSV above.</p>
+  <a class="btn btn-primary" href="{{ url_for('new_target') }}">Add your first target</a>
+</section>
+{% endif %}
+
+<script>
+function filterTargets(query) {
+  const q = query.trim().toLowerCase();
+  const cards = document.querySelectorAll('#target-list .target-card');
+  let visible = 0;
+  cards.forEach(card => {
+    const match = !q || card.dataset.search.includes(q);
+    card.hidden = !match;
+    if (match) visible++;
+  });
+  const noResults = document.getElementById('no-results');
+  if (noResults) noResults.hidden = visible !== 0;
+}
+
+function toggleAll(state) {
+  document.querySelectorAll('.bulk-checkbox').forEach(cb => { cb.checked = state; });
+  updateBulkCount();
+}
+
+function updateBulkCount() {
+  const el = document.getElementById('bulk-count');
+  if (!el) return;
+  const n = document.querySelectorAll('.bulk-checkbox:checked').length;
+  el.textContent = n ? `${n} selected` : '';
+}
+
+function confirmBulkSend(e) {
+  // Per-card buttons (Skip, Generate draft, etc.) override the form's action
+  // via formaction and submit through this same <form>; only intercept the
+  // actual "Send selected drafts" submit button.
+  if (e.submitter && e.submitter.hasAttribute('formaction')) {
+    return true;
+  }
+  const checked = Array.from(document.querySelectorAll('.bulk-checkbox:checked'));
+  if (checked.length === 0) {
+    e.preventDefault();
+    alert('Select at least one draft to send.');
+    return false;
+  }
+  const companies = checked.map(cb => cb.dataset.company).join(', ');
+  return confirm(`Send ${checked.length} email(s) with resume attached to: ${companies}?`);
+}
+
+document.addEventListener('DOMContentLoaded', updateBulkCount);
+</script>
+
+{% endblock %}
