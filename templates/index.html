@@ -104,64 +104,104 @@
 {% if targets %}
 <section class="toolbar">
   <input type="search" id="target-search" class="search-input"
-         placeholder="Search by company, contact, or role..."
+         placeholder="Search the current tab by company, contact, or role..."
          oninput="filterTargets(this.value)">
 </section>
 
-{# ---------- Needs action: drafted + new ---------- #}
-{% if pending %}
-  {% if counts.get('new', 0) %}
-  <form method="post" action="{{ url_for('process_all') }}"
-        onsubmit="return confirm('Generate a draft for all {{ counts.get('new', 0) }} pending target(s), verify each against your resume, and immediately email any draft with no unverified claims. Anything flagged with unverified claims will be drafted but held for you to review, not sent. Continue?');">
-    <div class="bulk-bar bulk-bar-primary">
-      <div class="bulk-bar-left">
-        <strong>{{ counts.get('new', 0) }} pending target{{ 's' if counts.get('new', 0) != 1 else '' }}</strong>
-        <span class="bulk-hint">Clean drafts send automatically; flagged ones wait for review.</span>
-      </div>
-      <button class="btn btn-primary" type="submit">Generate &amp; send all pending</button>
-    </div>
-  </form>
-  {% endif %}
+<nav class="tabs" role="tablist">
+  <button type="button" class="tab-btn{{ ' active' if default_tab == 'todo' }}" data-tab="todo" onclick="switchTab('todo')">
+    To do <span class="tab-count">{{ counts.get('new', 0) + counts.get('drafted', 0) }}</span>
+  </button>
+  <button type="button" class="tab-btn{{ ' active' if default_tab == 'sent' }}" data-tab="sent" onclick="switchTab('sent')">
+    Sent <span class="tab-count">{{ counts.get('sent', 0) }}</span>
+  </button>
+  <button type="button" class="tab-btn{{ ' active' if default_tab == 'replied' }}" data-tab="replied" onclick="switchTab('replied')">
+    Replied <span class="tab-count">{{ counts.get('replied', 0) }}</span>
+  </button>
+  <button type="button" class="tab-btn{{ ' active' if default_tab == 'skipped' }}" data-tab="skipped" onclick="switchTab('skipped')">
+    Skipped <span class="tab-count">{{ skipped | length }}</span>
+  </button>
+</nav>
 
-  <form method="post" action="{{ url_for('send_bulk') }}" id="bulk-send-form" onsubmit="return confirmBulkSend(event)">
-    {% if counts.get('drafted', 0) %}
-    <div class="bulk-bar">
-      <div class="bulk-bar-left">
-        <a href="#" onclick="toggleAll(true); return false;">Select all</a>
-        <span class="bulk-sep">·</span>
-        <a href="#" onclick="toggleAll(false); return false;">Select none</a>
-        <span class="bulk-count" id="bulk-count"></span>
+{# ---------- Tab: To do (drafted + new) ---------- #}
+<div class="tab-panel" data-tab="todo" {% if default_tab != 'todo' %}hidden{% endif %}>
+  {% if pending %}
+    {% if counts.get('new', 0) %}
+    <form method="post" action="{{ url_for('process_all') }}"
+          onsubmit="return confirm('Generate a draft for all {{ counts.get('new', 0) }} pending target(s), verify each against your resume, and immediately email any draft with no unverified claims. Anything flagged with unverified claims will be drafted but held for you to review, not sent. Continue?');">
+      <div class="bulk-bar bulk-bar-primary">
+        <div class="bulk-bar-left">
+          <strong>{{ counts.get('new', 0) }} pending target{{ 's' if counts.get('new', 0) != 1 else '' }}</strong>
+          <span class="bulk-hint">Clean drafts send automatically; flagged ones wait for review.</span>
+        </div>
+        <button class="btn btn-primary" type="submit">Generate &amp; send all pending</button>
       </div>
-      <button class="btn btn-primary" type="submit">Send selected drafts</button>
-    </div>
+    </form>
     {% endif %}
+
+    <form method="post" action="{{ url_for('send_bulk') }}" id="bulk-send-form" onsubmit="return confirmBulkSend(event)">
+      {% if counts.get('drafted', 0) %}
+      <div class="bulk-bar">
+        <div class="bulk-bar-left">
+          <a href="#" onclick="toggleAll(true); return false;">Select all</a>
+          <span class="bulk-sep">·</span>
+          <a href="#" onclick="toggleAll(false); return false;">Select none</a>
+          <span class="bulk-count" id="bulk-count"></span>
+        </div>
+        <button class="btn btn-primary" type="submit">Send selected drafts</button>
+      </div>
+      {% endif %}
+      <div class="target-list">
+        {% for t in pending %}{{ card(t, bulk=True) }}{% endfor %}
+      </div>
+    </form>
+  {% else %}
+    <p class="tab-empty">Nothing to do — all caught up. Import a CSV or add a target to get started.</p>
+  {% endif %}
+  <p class="no-results" hidden>No targets match your search.</p>
+</div>
+
+{# ---------- Tab: Sent, grouped by send date ---------- #}
+<div class="tab-panel" data-tab="sent" {% if default_tab != 'sent' %}hidden{% endif %}>
+  {% for g in sent_groups %}
+  <section class="date-group">
+    <h3 class="date-header">{{ g.label }} <span class="date-count">{{ g.count }}</span></h3>
     <div class="target-list">
-      {% for t in pending %}{{ card(t, bulk=True) }}{% endfor %}
+      {% for t in g.targets %}{{ card(t, bulk=False) }}{% endfor %}
     </div>
-  </form>
-{% endif %}
+  </section>
+  {% else %}
+  <p class="tab-empty">No emails sent yet.</p>
+  {% endfor %}
+  <p class="no-results" hidden>No targets match your search.</p>
+</div>
 
-{# ---------- Sent history, grouped by date ---------- #}
-{% for g in history_groups %}
-<section class="date-group">
-  <h3 class="date-header">{{ g.label }} <span class="date-count">{{ g.count }}</span></h3>
-  <div class="target-list">
-    {% for t in g.targets %}{{ card(t, bulk=False) }}{% endfor %}
-  </div>
-</section>
-{% endfor %}
+{# ---------- Tab: Replied, grouped by reply date ---------- #}
+<div class="tab-panel" data-tab="replied" {% if default_tab != 'replied' %}hidden{% endif %}>
+  {% for g in replied_groups %}
+  <section class="date-group">
+    <h3 class="date-header">{{ g.label }} <span class="date-count">{{ g.count }}</span></h3>
+    <div class="target-list">
+      {% for t in g.targets %}{{ card(t, bulk=False) }}{% endfor %}
+    </div>
+  </section>
+  {% else %}
+  <p class="tab-empty">No replies yet. When someone responds, mark them replied from the Sent tab.</p>
+  {% endfor %}
+  <p class="no-results" hidden>No targets match your search.</p>
+</div>
 
-{# ---------- Skipped ---------- #}
-{% if skipped %}
-<details class="date-group skipped-group">
-  <summary class="date-header">Skipped <span class="date-count">{{ skipped | length }}</span></summary>
+{# ---------- Tab: Skipped ---------- #}
+<div class="tab-panel" data-tab="skipped" {% if default_tab != 'skipped' %}hidden{% endif %}>
+  {% if skipped %}
   <div class="target-list">
     {% for t in skipped %}{{ card(t, bulk=False) }}{% endfor %}
   </div>
-</details>
-{% endif %}
-
-<p class="no-results" id="no-results" hidden>No targets match your search.</p>
+  {% else %}
+  <p class="tab-empty">Nothing skipped.</p>
+  {% endif %}
+  <p class="no-results" hidden>No targets match your search.</p>
+</div>
 
 {% else %}
 <section class="empty">
@@ -172,21 +212,39 @@
 {% endif %}
 
 <script>
+let activeTab = '{{ default_tab }}';
+
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
+  document.querySelectorAll('.tab-panel').forEach(p => {
+    p.hidden = p.dataset.tab !== tab;
+  });
+  // Re-apply the current search within the newly shown tab.
+  const search = document.getElementById('target-search');
+  filterTargets(search ? search.value : '');
+}
+
 function filterTargets(query) {
   const q = query.trim().toLowerCase();
-  const cards = document.querySelectorAll('.target-card');
+  const panel = document.querySelector('.tab-panel[data-tab="' + activeTab + '"]');
+  if (!panel) return;
+  const cards = panel.querySelectorAll('.target-card');
   let visible = 0;
   cards.forEach(card => {
     const match = !q || card.dataset.search.includes(q);
     card.hidden = !match;
     if (match) visible++;
   });
-  // Hide any date/skipped group whose cards are all filtered out.
-  document.querySelectorAll('.date-group').forEach(group => {
+  // Hide any date group in this tab whose cards are all filtered out.
+  panel.querySelectorAll('.date-group').forEach(group => {
     group.hidden = !group.querySelector('.target-card:not([hidden])');
   });
-  const noResults = document.getElementById('no-results');
-  if (noResults) noResults.hidden = visible !== 0;
+  // "No results" only when there ARE cards but the search hid them all.
+  const noResults = panel.querySelector('.no-results');
+  if (noResults) noResults.hidden = !(cards.length && visible === 0);
 }
 
 function toggleAll(state) {

@@ -25,16 +25,16 @@ app.secret_key = "local-only-tool"
 db.init_db()
 
 
-def _group_history(items):
-    """Bucket sent/replied targets by their LOCAL send date, most recent first."""
+def _group_history(items, date_field="sent_at"):
+    """Bucket targets by their LOCAL date (sent_at or replied_at), newest first."""
     today = datetime.now().date()
     buckets = {}
     for t in items:
-        sent_at = t.get("sent_at")
+        stamp = t.get(date_field)
         dt = None
-        if sent_at:
+        if stamp:
             try:
-                dt = datetime.fromisoformat(sent_at).replace(tzinfo=timezone.utc).astimezone()
+                dt = datetime.fromisoformat(stamp).replace(tzinfo=timezone.utc).astimezone()
             except (TypeError, ValueError):
                 dt = None
         buckets.setdefault(dt.date() if dt else None, []).append((t, dt))
@@ -66,12 +66,26 @@ def index():
     follow_ups = sum(1 for t in targets if t["needs_follow_up"])
     pending = [t for t in targets if t["status"] in ("drafted", "new")]
     skipped = [t for t in targets if t["status"] == "skipped"]
-    history_groups = _group_history(
-        [t for t in targets if t["status"] in ("sent", "replied")])
+    sent_groups = _group_history([t for t in targets if t["status"] == "sent"])
+    replied_groups = _group_history(
+        [t for t in targets if t["status"] == "replied"], date_field="replied_at")
     activity = db.sent_activity(7)
+    # Open on the first tab that actually has something in it, so the page is
+    # never blank just because there's nothing left "to do".
+    if pending:
+        default_tab = "todo"
+    elif sent_groups:
+        default_tab = "sent"
+    elif replied_groups:
+        default_tab = "replied"
+    elif skipped:
+        default_tab = "skipped"
+    else:
+        default_tab = "todo"
     return render_template("index.html", targets=targets, counts=counts,
                            follow_ups=follow_ups, pending=pending, skipped=skipped,
-                           history_groups=history_groups, activity=activity)
+                           sent_groups=sent_groups, replied_groups=replied_groups,
+                           activity=activity, default_tab=default_tab)
 
 
 @app.route("/targets/new", methods=["GET", "POST"])
