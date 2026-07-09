@@ -8,6 +8,13 @@
     <p class="target-contact">To: {{ target.contact_name or 'Unknown contact' }}{% if target.contact_title %} ({{ target.contact_title }}){% endif %} &lt;{{ target.contact_email }}&gt;</p>
   </div>
 
+  {% if prior %}
+  <div class="dupe-warning">
+    ⚠ You've already emailed <strong>{{ target.contact_email }}</strong> before —
+    via {{ prior | map(attribute='company') | join(', ') }}. Sending again will be a duplicate.
+  </div>
+  {% endif %}
+
   <div class="review-grid">
     <form method="post" class="draft-editor" id="draft-form">
       <label>Subject
@@ -19,7 +26,7 @@
       <div class="form-actions">
         <button class="btn btn-primary" type="submit"
                 formaction="{{ url_for('approve_and_send', target_id=target.id) }}"
-                onclick="return confirm('Send this email to {{ target.contact_email }} with your resume attached?');">
+                onclick="return confirm('{% if prior %}WARNING: you have already emailed this address before — this will be a DUPLICATE. {% endif %}Send this email to {{ target.contact_email }} with your resume attached?');">
           Approve and send
         </button>
         <button class="btn btn-quiet" type="submit"

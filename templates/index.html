@@ -17,12 +17,19 @@
       {% if bulk and t.status == 'drafted' %}
       <input type="checkbox" class="bulk-checkbox" name="target_ids" value="{{ t.id }}"
              data-company="{{ t.company }}"
-             {% if not t.unsupported_count %}checked{% endif %}
+             data-contacted-before="{{ '1' if t.contacted_before else '' }}"
+             {% if not t.unsupported_count and not t.contacted_before %}checked{% endif %}
              onchange="updateBulkCount()">
       {% endif %}
       <h2>{{ t.company }}</h2>
       <span class="status status-{{ t.status }}">{{ t.status }}</span>
       {% if t.needs_follow_up %}<span class="status status-followup">follow up</span>{% endif %}
+      {% if t.contacted_before %}
+      <span class="status status-dupe"
+            title="This contact was already emailed via: {{ t.contacted_before_where | join(', ') }}">
+        emailed before{% if t.contacted_before_count > 1 %} ×{{ t.contacted_before_count }}{% endif %}
+      </span>
+      {% endif %}
       {% if t.status == 'drafted' and t.unsupported_count %}
       <span class="status status-warn">{{ t.unsupported_count }} unverified claim{{ 's' if t.unsupported_count != 1 else '' }}</span>
       {% endif %}
@@ -273,7 +280,13 @@ function confirmBulkSend(e) {
     return false;
   }
   const companies = checked.map(cb => cb.dataset.company).join(', ');
-  return confirm(`Send ${checked.length} email(s) with resume attached to: ${companies}?`);
+  const dupes = checked.filter(cb => cb.dataset.contactedBefore).map(cb => cb.dataset.company);
+  let msg = `Send ${checked.length} email(s) with resume attached to: ${companies}?`;
+  if (dupes.length) {
+    msg = `⚠ WARNING: ${dupes.length} of these were ALREADY emailed before `
+        + `(${dupes.join(', ')}). Sending again will be a duplicate.\n\n` + msg;
+  }
+  return confirm(msg);
 }
 
 document.addEventListener('DOMContentLoaded', updateBulkCount);

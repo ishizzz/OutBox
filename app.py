@@ -178,7 +178,8 @@ def review(target_id):
     if not target or not draft:
         flash("Nothing to review yet. Generate a draft first.", "error")
         return redirect(url_for("index"))
-    return render_template("review.html", target=target, draft=draft)
+    prior = db.prior_sends(target["contact_email"], exclude_id=target_id)
+    return render_template("review.html", target=target, draft=draft, prior=prior)
 
 
 @app.route("/targets/<int:target_id>/save", methods=["POST"])
@@ -223,7 +224,8 @@ def process_all():
         flash(str(exc), "error")
         return redirect(url_for("index"))
 
-    sent, held, failed = [], [], []
+    sent, held, dupes, failed = [], [], [], []
+    sent_emails = set()  # addresses emailed within THIS run, to catch in-batch dupes
     for t in pending:
         target_id = t["id"]
         target = db.get_target(target_id)
@@ -249,6 +251,13 @@ def process_all():
             held.append(target["company"])
             continue
 
+        # Don't auto-send to someone we've already emailed (or just emailed in
+        # this same batch); hold it as a draft for a conscious manual decision.
+        email_norm = (target["contact_email"] or "").strip().lower()
+        if db.prior_sends(target["contact_email"], exclude_id=target_id) or email_norm in sent_emails:
+            dupes.append(target["company"])
+            continue
+
         try:
             send_email(target["contact_email"], subject, body)
         except Exception as exc:
@@ -256,15 +265,20 @@ def process_all():
             continue
         db.set_status(target_id, "sent", sent_at=db.now())
         sent.append(target["company"])
+        sent_emails.add(email_norm)
 
     if sent:
         flash(f"Sent {len(sent)} email(s) automatically: {', '.join(sent)}.", "ok")
     if held:
         flash(f"Drafted {len(held)} but held for review (unverified claims found): "
               f"{', '.join(held)}. Review and send them from the pipeline.", "error")
+    if dupes:
+        flash(f"Held {len(dupes)} — already emailed this contact before: "
+              f"{', '.join(dupes)}. They're drafted; send manually if you still want to.",
+              "error")
     if failed:
         flash(f"Failed to process {len(failed)}: {', '.join(failed)}.", "error")
-    if not (sent or held or failed):
+    if not (sent or held or dupes or failed):
         flash("Nothing processed.", "error")
     return redirect(url_for("index"))
 

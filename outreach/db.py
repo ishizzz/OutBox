@@ -84,6 +84,25 @@ def get_target(target_id):
         return dict(row) if row else None
 
 
+def prior_sends(email, exclude_id=None):
+    """Targets already emailed (sent/replied) at this address, case-insensitive.
+
+    Used to warn before emailing the same person twice. `exclude_id` skips the
+    target being acted on so it never counts itself.
+    """
+    email = (email or "").strip().lower()
+    if not email:
+        return []
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, company, role, sent_at FROM targets "
+            "WHERE status IN ('sent', 'replied') "
+            "AND lower(trim(contact_email)) = ? ORDER BY id DESC",
+            (email,),
+        ).fetchall()
+    return [dict(r) for r in rows if r["id"] != exclude_id]
+
+
 def list_targets():
     with get_conn() as conn:
         rows = conn.execute(
@@ -95,6 +114,14 @@ def list_targets():
             "WHEN 'sent' THEN 2 WHEN 'replied' THEN 3 ELSE 4 END, t.id DESC"
         ).fetchall()
         targets = [dict(r) for r in rows]
+    # Map each email we've already emailed (sent/replied) to those targets, so
+    # we can flag any OTHER target that reuses the same contact address.
+    emailed = {}
+    for t in targets:
+        email = (t.get("contact_email") or "").strip().lower()
+        if email and t["status"] in ("sent", "replied"):
+            emailed.setdefault(email, []).append(t)
+
     cutoff = datetime.utcnow() - timedelta(days=FOLLOW_UP_DAYS)
     for t in targets:
         t["needs_follow_up"] = (
@@ -108,6 +135,15 @@ def list_targets():
                 t["unsupported_count"] = json.loads(t["draft_claims_report"]).get("unsupported_count", 0)
             except (TypeError, json.JSONDecodeError):
                 pass
+
+        email = (t.get("contact_email") or "").strip().lower()
+        priors = [o for o in emailed.get(email, []) if o["id"] != t["id"]]
+        t["contacted_before"] = bool(priors)
+        t["contacted_before_count"] = len(priors)
+        t["contacted_before_where"] = [
+            o["company"] + (" (" + o["role"] + ")" if o.get("role") else "")
+            for o in priors
+        ]
     return targets
 
 

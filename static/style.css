@@ -134,6 +134,7 @@ main { max-width: 1000px; margin: 0 auto; padding: 24px 20px 80px; }
 .status-replied { background: var(--go); border-color: var(--go); color: #fff; }
 .status-followup { border-color: var(--flag); color: var(--flag); background: var(--flag-bg); }
 .status-warn { border-color: var(--bad); color: var(--bad); background: var(--bad-bg); }
+.status-dupe { border-color: #6d5bd0; color: #4c3fb0; background: #efedfb; }
 .status-skipped { opacity: 0.6; }
 
 /* buttons */
@@ -244,6 +245,7 @@ textarea { resize: vertical; line-height: 1.6; }
 .claims-sub { margin: 0 0 14px; color: var(--ink-soft); font-size: 13px; }
 .claims-alert { background: var(--bad-bg); color: var(--bad); padding: 10px 12px; border-radius: 6px; font-weight: 600; font-size: 13px; margin-bottom: 12px; }
 .claims-clear { background: var(--ok-bg); color: var(--go-deep); padding: 10px 12px; border-radius: 6px; font-weight: 600; font-size: 13px; margin-bottom: 12px; }
+.dupe-warning { background: var(--flag-bg); color: var(--flag); border: 1px solid var(--flag); padding: 11px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; margin-bottom: 16px; }
 .claims-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .claim { display: flex; gap: 10px; padding: 10px; border-radius: 6px; border: 1px solid var(--line); }
 .claim-ok { background: #fbfdfc; }
