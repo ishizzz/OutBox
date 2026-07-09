@@ -1,5 +1,60 @@
 {% extends "base.html" %}
 {% block title %}Pipeline{% endblock %}
+
+{#
+  card(t, bulk): renders one target card.
+  - bulk=True  → card lives inside the big bulk-send <form>; its action buttons
+                 use formaction (no nested forms allowed) and drafted cards show
+                 a selection checkbox.
+  - bulk=False → standalone card (history / skipped sections); each action button
+                 gets its own little <form>.
+#}
+{% macro card(t, bulk=False) %}
+<article class="target-card" id="t{{ t.id }}"
+          data-search="{{ (t.company ~ ' ' ~ t.role ~ ' ' ~ (t.contact_name or '')) | lower }}">
+  <div class="target-main">
+    <div class="target-heading">
+      {% if bulk and t.status == 'drafted' %}
+      <input type="checkbox" class="bulk-checkbox" name="target_ids" value="{{ t.id }}"
+             data-company="{{ t.company }}"
+             {% if not t.unsupported_count %}checked{% endif %}
+             onchange="updateBulkCount()">
+      {% endif %}
+      <h2>{{ t.company }}</h2>
+      <span class="status status-{{ t.status }}">{{ t.status }}</span>
+      {% if t.needs_follow_up %}<span class="status status-followup">follow up</span>{% endif %}
+      {% if t.status == 'drafted' and t.unsupported_count %}
+      <span class="status status-warn">{{ t.unsupported_count }} unverified claim{{ 's' if t.unsupported_count != 1 else '' }}</span>
+      {% endif %}
+    </div>
+    <p class="target-role">{{ t.role }}</p>
+    <p class="target-contact">{{ t.contact_name or 'Unknown contact' }}{% if t.contact_title %} ({{ t.contact_title }}){% endif %} · {{ t.contact_email }}</p>
+    {% if t.status == 'drafted' and t.draft_subject %}
+    <p class="target-subject">"{{ t.draft_subject }}"</p>
+    {% endif %}
+  </div>
+  <div class="target-actions">
+    {% if bulk %}
+      {% if t.status in ['new', 'skipped'] %}
+        <button class="btn btn-primary" type="submit" formmethod="post" formaction="{{ url_for('create_draft', target_id=t.id) }}">Generate draft</button>
+      {% elif t.status == 'drafted' %}
+        <a class="btn btn-primary" href="{{ url_for('review', target_id=t.id) }}">Review draft</a>
+        <button class="btn btn-quiet" type="submit" formmethod="post" formaction="{{ url_for('create_draft', target_id=t.id) }}">Regenerate</button>
+      {% endif %}
+      {% if t.status in ['new', 'drafted'] %}
+        <button class="btn btn-ghost" type="submit" formmethod="post" formaction="{{ url_for('skip', target_id=t.id) }}">Skip</button>
+      {% endif %}
+    {% else %}
+      {% if t.status == 'sent' %}
+        <form method="post" action="{{ url_for('mark_replied', target_id=t.id) }}"><button class="btn btn-quiet" type="submit">Mark replied</button></form>
+      {% elif t.status == 'skipped' %}
+        <form method="post" action="{{ url_for('create_draft', target_id=t.id) }}"><button class="btn btn-primary" type="submit">Generate draft</button></form>
+      {% endif %}
+    {% endif %}
+  </div>
+</article>
+{% endmacro %}
+
 {% block content %}
 
 <details class="import-box" {% if not targets %}open{% endif %}>
@@ -21,6 +76,31 @@
   {% endif %}
 </section>
 
+<section class="activity">
+  <div class="activity-summary">
+    <div class="activity-metric">
+      <span class="activity-num">{{ activity.today }}</span>
+      <span class="activity-label">sent today</span>
+    </div>
+    <div class="activity-metric">
+      <span class="activity-num">{{ activity.week_total }}</span>
+      <span class="activity-label">last 7 days</span>
+    </div>
+  </div>
+  <div class="activity-chart">
+    {% for d in activity.series %}
+    <div class="activity-day{{ ' activity-today' if d.is_today }}" title="{{ d.label }}: {{ d.count }} sent">
+      <div class="activity-bar-wrap">
+        <span class="activity-daycount">{{ d.count }}</span>
+        <div class="activity-bar {{ 'has-count' if d.count }}"
+             style="height: {{ ((d.count / activity.max) * 100) | round | int if activity.max else 0 }}%"></div>
+      </div>
+      <span class="activity-dayname">{{ d.weekday }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
 {% if targets %}
 <section class="toolbar">
   <input type="search" id="target-search" class="search-input"
@@ -28,74 +108,58 @@
          oninput="filterTargets(this.value)">
 </section>
 
-{% if counts.get('new', 0) %}
-<form method="post" action="{{ url_for('process_all') }}"
-      onsubmit="return confirm('Generate a draft for all {{ counts.get('new', 0) }} pending target(s), verify each against your resume, and immediately email any draft with no unverified claims. Anything flagged with unverified claims will be drafted but held for you to review, not sent. Continue?');">
-  <div class="bulk-bar bulk-bar-primary">
-    <div class="bulk-bar-left">
-      <strong>{{ counts.get('new', 0) }} pending target{{ 's' if counts.get('new', 0) != 1 else '' }}</strong>
-      <span class="bulk-hint">Clean drafts send automatically; flagged ones wait for review.</span>
+{# ---------- Needs action: drafted + new ---------- #}
+{% if pending %}
+  {% if counts.get('new', 0) %}
+  <form method="post" action="{{ url_for('process_all') }}"
+        onsubmit="return confirm('Generate a draft for all {{ counts.get('new', 0) }} pending target(s), verify each against your resume, and immediately email any draft with no unverified claims. Anything flagged with unverified claims will be drafted but held for you to review, not sent. Continue?');">
+    <div class="bulk-bar bulk-bar-primary">
+      <div class="bulk-bar-left">
+        <strong>{{ counts.get('new', 0) }} pending target{{ 's' if counts.get('new', 0) != 1 else '' }}</strong>
+        <span class="bulk-hint">Clean drafts send automatically; flagged ones wait for review.</span>
+      </div>
+      <button class="btn btn-primary" type="submit">Generate &amp; send all pending</button>
     </div>
-    <button class="btn btn-primary" type="submit">Generate &amp; send all pending</button>
-  </div>
-</form>
-{% endif %}
-
-<form method="post" action="{{ url_for('send_bulk') }}" id="bulk-send-form" onsubmit="return confirmBulkSend(event)">
-  {% if counts.get('drafted', 0) %}
-  <div class="bulk-bar">
-    <div class="bulk-bar-left">
-      <a href="#" onclick="toggleAll(true); return false;">Select all</a>
-      <span class="bulk-sep">·</span>
-      <a href="#" onclick="toggleAll(false); return false;">Select none</a>
-      <span class="bulk-count" id="bulk-count"></span>
-    </div>
-    <button class="btn btn-primary" type="submit">Send selected drafts</button>
-  </div>
+  </form>
   {% endif %}
 
-  <section class="target-list" id="target-list">
-    {% for t in targets %}
-    <article class="target-card" id="t{{ t.id }}"
-              data-search="{{ (t.company ~ ' ' ~ t.role ~ ' ' ~ (t.contact_name or '')) | lower }}">
-      <div class="target-main">
-        <div class="target-heading">
-          {% if t.status == 'drafted' %}
-          <input type="checkbox" class="bulk-checkbox" name="target_ids" value="{{ t.id }}"
-                 data-company="{{ t.company }}"
-                 {% if not t.unsupported_count %}checked{% endif %}
-                 onchange="updateBulkCount()">
-          {% endif %}
-          <h2>{{ t.company }}</h2>
-          <span class="status status-{{ t.status }}">{{ t.status }}</span>
-          {% if t.needs_follow_up %}<span class="status status-followup">follow up</span>{% endif %}
-          {% if t.status == 'drafted' and t.unsupported_count %}
-          <span class="status status-warn">{{ t.unsupported_count }} unverified claim{{ 's' if t.unsupported_count != 1 else '' }}</span>
-          {% endif %}
-        </div>
-        <p class="target-role">{{ t.role }}</p>
-        <p class="target-contact">{{ t.contact_name or 'Unknown contact' }}{% if t.contact_title %} ({{ t.contact_title }}){% endif %} · {{ t.contact_email }}</p>
-        {% if t.status == 'drafted' and t.draft_subject %}
-        <p class="target-subject">"{{ t.draft_subject }}"</p>
-        {% endif %}
+  <form method="post" action="{{ url_for('send_bulk') }}" id="bulk-send-form" onsubmit="return confirmBulkSend(event)">
+    {% if counts.get('drafted', 0) %}
+    <div class="bulk-bar">
+      <div class="bulk-bar-left">
+        <a href="#" onclick="toggleAll(true); return false;">Select all</a>
+        <span class="bulk-sep">·</span>
+        <a href="#" onclick="toggleAll(false); return false;">Select none</a>
+        <span class="bulk-count" id="bulk-count"></span>
       </div>
-      <div class="target-actions">
-        {% if t.status in ['new', 'skipped'] %}
-          <button class="btn btn-primary" type="submit" formmethod="post" formaction="{{ url_for('create_draft', target_id=t.id) }}">Generate draft</button>
-        {% elif t.status == 'drafted' %}
-          <a class="btn btn-primary" href="{{ url_for('review', target_id=t.id) }}">Review draft</a>
-          <button class="btn btn-quiet" type="submit" formmethod="post" formaction="{{ url_for('create_draft', target_id=t.id) }}">Regenerate</button>
-        {% elif t.status == 'sent' %}
-          <button class="btn btn-quiet" type="submit" formmethod="post" formaction="{{ url_for('mark_replied', target_id=t.id) }}">Mark replied</button>
-        {% endif %}
-        {% if t.status in ['new', 'drafted'] %}
-          <button class="btn btn-ghost" type="submit" formmethod="post" formaction="{{ url_for('skip', target_id=t.id) }}">Skip</button>
-        {% endif %}
-      </div>
-    </article>
-    {% endfor %}
-  </section>
-</form>
+      <button class="btn btn-primary" type="submit">Send selected drafts</button>
+    </div>
+    {% endif %}
+    <div class="target-list">
+      {% for t in pending %}{{ card(t, bulk=True) }}{% endfor %}
+    </div>
+  </form>
+{% endif %}
+
+{# ---------- Sent history, grouped by date ---------- #}
+{% for g in history_groups %}
+<section class="date-group">
+  <h3 class="date-header">{{ g.label }} <span class="date-count">{{ g.count }}</span></h3>
+  <div class="target-list">
+    {% for t in g.targets %}{{ card(t, bulk=False) }}{% endfor %}
+  </div>
+</section>
+{% endfor %}
+
+{# ---------- Skipped ---------- #}
+{% if skipped %}
+<details class="date-group skipped-group">
+  <summary class="date-header">Skipped <span class="date-count">{{ skipped | length }}</span></summary>
+  <div class="target-list">
+    {% for t in skipped %}{{ card(t, bulk=False) }}{% endfor %}
+  </div>
+</details>
+{% endif %}
 
 <p class="no-results" id="no-results" hidden>No targets match your search.</p>
 
@@ -110,12 +174,16 @@
 <script>
 function filterTargets(query) {
   const q = query.trim().toLowerCase();
-  const cards = document.querySelectorAll('#target-list .target-card');
+  const cards = document.querySelectorAll('.target-card');
   let visible = 0;
   cards.forEach(card => {
     const match = !q || card.dataset.search.includes(q);
     card.hidden = !match;
     if (match) visible++;
+  });
+  // Hide any date/skipped group whose cards are all filtered out.
+  document.querySelectorAll('.date-group').forEach(group => {
+    group.hidden = !group.querySelector('.target-card:not([hidden])');
   });
   const noResults = document.getElementById('no-results');
   if (noResults) noResults.hidden = visible !== 0;

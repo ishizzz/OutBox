@@ -5,6 +5,7 @@ Run:  python app.py   then open http://127.0.0.1:5000
 
 import csv
 import io
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
@@ -24,6 +25,38 @@ app.secret_key = "local-only-tool"
 db.init_db()
 
 
+def _group_history(items):
+    """Bucket sent/replied targets by their LOCAL send date, most recent first."""
+    today = datetime.now().date()
+    buckets = {}
+    for t in items:
+        sent_at = t.get("sent_at")
+        dt = None
+        if sent_at:
+            try:
+                dt = datetime.fromisoformat(sent_at).replace(tzinfo=timezone.utc).astimezone()
+            except (TypeError, ValueError):
+                dt = None
+        buckets.setdefault(dt.date() if dt else None, []).append((t, dt))
+
+    groups = []
+    for d in sorted((k for k in buckets if k is not None), reverse=True):
+        cards = sorted(buckets[d], key=lambda x: x[1], reverse=True)
+        delta = (today - d).days
+        if delta == 0:
+            label = "Today"
+        elif delta == 1:
+            label = "Yesterday"
+        else:
+            label = d.strftime("%a, %b ") + str(d.day)
+        groups.append({"label": label, "count": len(cards),
+                       "targets": [c[0] for c in cards]})
+    if None in buckets:
+        groups.append({"label": "No send date", "count": len(buckets[None]),
+                       "targets": [c[0] for c in buckets[None]]})
+    return groups
+
+
 @app.route("/")
 def index():
     targets = db.list_targets()
@@ -31,8 +64,14 @@ def index():
     for t in targets:
         counts[t["status"]] = counts.get(t["status"], 0) + 1
     follow_ups = sum(1 for t in targets if t["needs_follow_up"])
+    pending = [t for t in targets if t["status"] in ("drafted", "new")]
+    skipped = [t for t in targets if t["status"] == "skipped"]
+    history_groups = _group_history(
+        [t for t in targets if t["status"] in ("sent", "replied")])
+    activity = db.sent_activity(7)
     return render_template("index.html", targets=targets, counts=counts,
-                           follow_ups=follow_ups)
+                           follow_ups=follow_ups, pending=pending, skipped=skipped,
+                           history_groups=history_groups, activity=activity)
 
 
 @app.route("/targets/new", methods=["GET", "POST"])

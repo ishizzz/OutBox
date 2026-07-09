@@ -3,7 +3,7 @@
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent / "outreach.db"
@@ -109,6 +109,43 @@ def list_targets():
             except (TypeError, json.JSONDecodeError):
                 pass
     return targets
+
+
+def sent_activity(days=7):
+    """Daily counts of emails sent over the last `days` days, in LOCAL time.
+
+    sent_at is stored as naive UTC (see now()); convert each to the machine's
+    local timezone before bucketing so 'today' lines up with the wall clock.
+    """
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT sent_at FROM targets WHERE sent_at IS NOT NULL AND sent_at != ''"
+        ).fetchall()
+    counts = {}
+    for r in rows:
+        try:
+            dt = datetime.fromisoformat(r["sent_at"]).replace(tzinfo=timezone.utc).astimezone()
+        except (TypeError, ValueError):
+            continue
+        d = dt.date()
+        counts[d] = counts.get(d, 0) + 1
+    today = datetime.now().date()
+    series = []
+    for i in range(days - 1, -1, -1):
+        d = today - timedelta(days=i)
+        series.append({
+            "date": d.isoformat(),
+            "weekday": d.strftime("%a"),
+            "label": d.strftime("%b ") + str(d.day),
+            "count": counts.get(d, 0),
+            "is_today": d == today,
+        })
+    return {
+        "series": series,
+        "week_total": sum(s["count"] for s in series),
+        "today": counts.get(today, 0),
+        "max": max((s["count"] for s in series), default=0),
+    }
 
 
 def set_status(target_id, status, **stamps):

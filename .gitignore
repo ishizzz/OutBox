@@ -41,10 +41,10 @@ wheels/
 *~
 .DS_Store
 
-# Resume file (if it's a personal file not to be shared)
-# Uncomment if needed:
-# resume_*.pdf
-# resume_*.txt
+# Resume file (personal/private)
+resume_*.pdf
+resume_ishita_chauhan.pdf
+resume_*.txt
 
 # Cache
 .pytest_cache/
